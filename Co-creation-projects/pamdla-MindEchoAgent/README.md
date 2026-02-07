@@ -46,12 +46,17 @@ MindEchoAgent/
 │   ├── __init__.py
 │   ├── agents/                  # 智能体模块
 │   │   ├── __init__.py
+│   │   ├── sleep_agent.py       # 子智能体
 │   │   └── mind_echo_agent.py   # 主智能体
-│   └── tools/                   # 工具模块
+│   ├── tools/                   # 工具模块
 │       ├── __init__.py
+│       ├── dialogue_state_tool.py # 对话状态工具
 │       ├── mood_music_tool.py   # 音乐推荐工具
 │       ├── text_comfort_tool.py # 文字安慰工具
 │       └── mood_summary_tool.py # 心情总结工具
+│   └── utils                    # 其它工具
+│       ├── loader.py            # 工具加载
+│       └── state.py             # 状态定义
 └── data/                        # 数据目录
     └── mood_history.json        # 心情历史记录
 ```
