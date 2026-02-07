@@ -122,6 +122,11 @@ MindEchoAgent/
 - 多端适配（支持家居设备，音箱、灯光、窗帘等）
 ```
 
+## 🎬 演示效果
+### 界面截图、演示录屏
+
+- [B站链接-演示录屏](https://www.bilibili.com/video/BV1FmFpzSELf)
+
 ## 🌐 智能家居扩展
 
 ### 小米音箱集成方案
