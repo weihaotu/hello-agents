@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from pydub import AudioSegment
@@ -33,7 +34,7 @@ class PodcastSynthesisService:
         # 确保 pydub/ffmpeg 可用 - 假设 ffmpeg 已安装在系统中
         # 如果没有，pydub 可能会发出警告或失败，但我们会捕获异常。
 
-    def synthesize_podcast(self, audio_files: list[str], task_id: str = "default", cancel_check: callable = None) -> str | None:
+    def synthesize_podcast(self, audio_files: list[str], task_id: str = "default", cancel_check: Callable[[], bool] | None = None) -> str | None:
         """
         将音频文件组合成单个播客 MP3。
 

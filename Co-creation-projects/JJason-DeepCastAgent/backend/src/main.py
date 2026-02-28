@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import glob
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from typing import Any
 
 # Ensure src directory is in sys.path for module imports
@@ -73,10 +76,37 @@ def _build_config(payload: ResearchRequest) -> Configuration:
 
 def create_app() -> FastAPI:
     """创建并配置 FastAPI 应用实例。"""
-    app = FastAPI(title="DeepCast - 自动播客生成智能体")
 
     # 当前活跃的研究 agent 引用，用于支持取消操作
     _active_agent: dict[str, DeepResearchAgent | None] = {"current": None}
+
+    # 确保输出目录存在（使用绝对路径，基于 backend 根目录）
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(backend_root, "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """应用生命周期管理：启动时记录配置，关闭时清理资源。"""
+        config = Configuration.from_env()
+        logger.info(
+            "DeepResearch configuration loaded: provider=%s model=%s base_url=%s search_api=%s "
+            "max_loops=%s fetch_full_page=%s tool_calling=%s strip_thinking=%s api_key=%s",
+            config.llm_provider,
+            config.resolved_model() or "unset",
+            config.llm_base_url or "unset",
+            config.search_api.value,
+            config.max_web_research_loops,
+            config.fetch_full_page,
+            config.use_tool_calling,
+            config.strip_thinking_tokens,
+            _mask_secret(config.llm_api_key),
+        )
+        yield  # 应用运行中
+        # 关闭时清理
+        _active_agent["current"] = None
+
+    app = FastAPI(title="DeepCast - 自动播客生成智能体", lifespan=lifespan)
 
     # 从配置读取 CORS 允许的源，避免生产环境使用通配符
     _startup_config = Configuration.from_env()
@@ -93,33 +123,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # 确保输出目录存在
-    # 使用绝对路径，基于 backend 根目录
-    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    output_dir = os.path.join(backend_root, "output")
-    os.makedirs(output_dir, exist_ok=True)
-    
     # 挂载静态文件目录，用于访问生成的音频文件
     app.mount("/output", StaticFiles(directory=output_dir), name="output")
-
-    @app.on_event("startup")
-    def log_startup_configuration() -> None:
-        """记录启动时的关键配置参数。"""
-        config = Configuration.from_env()
-
-        logger.info(
-            "DeepResearch configuration loaded: provider=%s model=%s base_url=%s search_api=%s "
-            "max_loops=%s fetch_full_page=%s tool_calling=%s strip_thinking=%s api_key=%s",
-            config.llm_provider,
-            config.resolved_model() or "unset",
-            config.llm_base_url or "unset",
-            config.search_api.value,
-            config.max_web_research_loops,
-            config.fetch_full_page,
-            config.use_tool_calling,
-            config.strip_thinking_tokens,
-            _mask_secret(config.llm_api_key),
-        )
 
     @app.get("/healthz")
     def health_check() -> dict[str, str]:
@@ -128,7 +133,6 @@ def create_app() -> FastAPI:
     @app.get("/api/audio/latest")
     def get_latest_audio() -> dict[str, Any]:
         """获取最新生成的音频文件。"""
-        import glob
         audio_dir = os.path.join(output_dir, "audio")
         if not os.path.exists(audio_dir):
             return {"file": None, "error": "音频目录不存在"}
@@ -222,8 +226,6 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         async def event_iterator():
-            import concurrent.futures
-
             loop = asyncio.get_event_loop()
             # 用 asyncio.Queue 桥接同步生成器和异步循环
             # 生成器在单一后台线程中完整运行，避免并发调用 next() 破坏生成器状态
@@ -234,6 +236,9 @@ def create_app() -> FastAPI:
                 """在后台线程中完整运行生成器，将事件逐一推入异步队列。"""
                 try:
                     for event in agent.run_stream(payload.topic):
+                        if agent.is_cancelled():
+                            logger.info("Generator stopped: cancel detected")
+                            break
                         loop.call_soon_threadsafe(event_queue.put_nowait, event)
                 except Exception as exc:
                     logger.exception("Generator raised exception")
@@ -280,12 +285,16 @@ def create_app() -> FastAPI:
                     if event.get("type") in ("done", "cancelled", "error"):
                         break
             finally:
+                # 确保取消信号被设置 —— 这是取消机制的核心：
+                # 前端 abort SSE 后 monitor_task 可能还未检测到断连就被 cancel，
+                # 而 /research/cancel API 到达时 _active_agent 可能已被置 None。
+                # 因此必须在此处显式调用 cancel() 确保后台线程能感知取消。
+                agent.cancel()
                 monitor_task.cancel()
                 try:
                     await monitor_task
                 except asyncio.CancelledError:
                     pass
-                # 不等待后台线程（daemon），立即返回响应
                 executor.shutdown(wait=False)
                 _active_agent["current"] = None
 

@@ -147,7 +147,7 @@ cd frontend
 npm run dev
 ```
 
-访问 `http://localhost:5173` 即可开始使用。
+访问 `http://localhost:5174` 即可开始使用。
 
 ## 📖 使用示例
 

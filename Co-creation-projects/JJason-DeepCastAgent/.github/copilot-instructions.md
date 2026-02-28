@@ -69,7 +69,7 @@ self.todo_agent = self._create_tool_aware_agent(
 | Role | Voice ID | Character |
 |------|----------|-----------|
 | Host (夏雨) | `xiayu` | Curious, humorous, audience proxy |
-| Guest (李华) | `liwa` | Knowledgeable expert |
+| Guest (李娃) | `liwa` | Knowledgeable expert |
 
 Voice mapping in [backend/src/services/audio_generator.py](backend/src/services/audio_generator.py) `_get_voice_for_role()`
 
