@@ -1,8 +1,6 @@
 """状态模型，用于深度研究工作流。"""
 
-import operator
 from dataclasses import dataclass, field
-from typing import Annotated
 
 
 @dataclass(kw_only=True)
@@ -30,11 +28,11 @@ class SummaryState:
     """
 
     research_topic: str | None = field(default=None)  # 研究主题
-    web_research_results: Annotated[list, operator.add] = field(default_factory=list)
-    sources_gathered: Annotated[list, operator.add] = field(default_factory=list)
+    web_research_results: list = field(default_factory=list)
+    sources_gathered: list = field(default_factory=list)
     research_loop_count: int = field(default=0)  # 研究循环次数
     running_summary: str | None = field(default=None)  # 传统摘要字段
-    todo_items: Annotated[list, operator.add] = field(default_factory=list)  # 待办任务项列表
+    todo_items: list = field(default_factory=list)  # 待办任务项列表
     structured_report: str | None = field(default=None)  # 结构化报告（JSON 字符串）
     report_note_id: str | None = field(default=None)  # 报告笔记 ID
     report_note_path: str | None = field(default=None)  # 报告笔记路径

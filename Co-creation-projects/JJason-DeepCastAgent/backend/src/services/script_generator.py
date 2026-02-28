@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from openai import OpenAI
 
@@ -141,8 +142,6 @@ class ScriptGenerationService:
         Returns:
             解析后的列表，失败返回 None
         """
-        import re
-        
         # 1. 直接尝试解析
         try:
             return json.loads(content)
@@ -195,8 +194,6 @@ class ScriptGenerationService:
     
     def _fix_json_issues(self, json_str: str) -> str:
         """尝试修复常见的 JSON 格式问题。"""
-        import re
-        
         fixed = json_str
         
         # 替换中文引号为英文引号
@@ -222,8 +219,6 @@ class ScriptGenerationService:
         
         当整体解析失败时，尝试提取每个 {role, content} 对象。
         """
-        import re
-        
         results = []
         
         # 匹配 {"role": "...", "content": "..."} 模式

@@ -32,11 +32,6 @@ from services.tool_events import ToolCallTracker
 logger = logging.getLogger(__name__)
 
 
-class CancelledException(Exception):
-    """研究任务被用户取消时抛出的异常。"""
-    pass
-
-
 class DeepResearchAgent:
     """使用 HelloAgents 协调基于 TODO 的研究工作流的协调器。"""
 
@@ -187,7 +182,7 @@ class DeepResearchAgent:
     def run_stream(self, topic: str) -> Iterator[dict[str, Any]]:
         """
         执行研究工作流并产生增量进度事件（流式模式）。
-        
+
         此方法使用多线程并行执行研究任务，并通过生成器实时返回进度。
         主要步骤：
         1. 初始化并规划任务。
@@ -195,22 +190,57 @@ class DeepResearchAgent:
         3. 实时流式传输任务状态、搜索结果和部分总结。
         4. 所有任务完成后，生成并流式传输最终报告。
         5. 生成并流式传输播客脚本和音频合成进度。
-        
+
         支持通过 cancel() 方法取消执行。
         """
         # 重置取消状态
         self._cancel_event.clear()
-        
+
         state = SummaryState(research_topic=topic)
         logger.debug("Starting streaming research: topic=%s", topic)
         yield {"type": "status", "message": "初始化研究流程"}
 
-        # 检查取消
         if self.is_cancelled():
             yield {"type": "cancelled", "message": "研究任务已取消"}
             return
 
+        # Phase 1: 规划 + 并行研究
+        yield from self._stream_research_phase(state)
+        if self.is_cancelled():
+            yield {"type": "cancelled", "message": "研究任务已取消"}
+            return
+
+        # Phase 2: 报告生成
+        yield from self._stream_report_phase(state)
+        if self.is_cancelled():
+            yield {"type": "cancelled", "message": "研究任务已取消"}
+            return
+
+        # Phase 3: 播客脚本
+        script_turns = yield from self._stream_script_phase(state)
+        if self.is_cancelled():
+            yield {"type": "cancelled", "message": "研究任务已取消"}
+            return
+        if script_turns == 0:
+            yield {"type": "done"}
+            return
+
+        # Phase 4: 音频生成 + 合成
+        yield from self._stream_audio_phase(state, script_turns)
+
+        yield {"type": "done"}
+
+    # ------------------------------------------------------------------
+    # 流式阶段方法
+    # ------------------------------------------------------------------
+
+    def _stream_research_phase(self, state: SummaryState) -> Iterator[dict[str, Any]]:
+        """Phase 1: 规划任务并行执行搜索 + 总结。"""
+        if self.is_cancelled():
+            return
         state.todo_items = self.planner.plan_todo_list(state)
+        if self.is_cancelled():
+            return
         for event in self._drain_tool_events(state, step=0):
             yield event
         if not state.todo_items:
@@ -222,8 +252,6 @@ class DeepResearchAgent:
             task.stream_token = token
             channel_map[task.id] = {"step": index, "token": token}
 
-        # 确保在开始多线程任务前，显式发送 todo_list 事件
-        # 使用 list comprehension 确保 task 被正确序列化
         serialized_tasks = [self._serialize_task(t) for t in state.todo_items]
         logger.info(f"Emitting todo_list event with {len(serialized_tasks)} tasks")
         yield {
@@ -245,7 +273,6 @@ class DeepResearchAgent:
             if task is not None:
                 target_task_id = task.id
                 payload["task_id"] = task.id
-
             channel = channel_map.get(target_task_id) if target_task_id is not None else None
             if channel:
                 payload.setdefault("step", channel["step"])
@@ -254,20 +281,15 @@ class DeepResearchAgent:
                 payload["step"] = step_override
             event_queue.put(payload)
 
-        def tool_event_sink(event: dict[str, Any]) -> None:
-            enqueue(event)
-
-        self._set_tool_event_sink(tool_event_sink)
+        self._set_tool_event_sink(lambda ev: enqueue(ev))
 
         threads: list[Thread] = []
 
         def worker(task: TodoItem, step: int) -> None:
             try:
-                # 检查取消状态
                 if self.is_cancelled():
                     enqueue({"type": "__task_done__", "task_id": task.id})
                     return
-                    
                 enqueue(
                     {
                         "type": "task_status",
@@ -281,16 +303,15 @@ class DeepResearchAgent:
                     },
                     task=task,
                 )
-
                 for event in self._execute_task(state, task, emit_stream=True, step=step):
-                    # 在每个事件之后检查取消
                     if self.is_cancelled():
                         break
                     enqueue(event, task=task)
-            except CancelledException:
-                logger.info("Task %s cancelled", task.id)
-            except Exception as exc:  # pragma: no cover - defensive guardrail
-                logger.exception("Task execution failed", exc_info=exc)
+            except Exception as exc:
+                if self.is_cancelled():
+                    logger.info("Task %s cancelled", task.id)
+                else:
+                    logger.exception("Task execution failed", exc_info=exc)
                 enqueue(
                     {
                         "type": "task_status",
@@ -319,17 +340,14 @@ class DeepResearchAgent:
 
         try:
             while finished_workers < active_workers:
-                # 使用带超时的 get 以便定期检查取消状态
                 try:
                     event = event_queue.get(timeout=0.5)
                 except Empty:
-                    # 检查是否取消
                     if self.is_cancelled():
                         logger.info("Research cancelled during task execution")
                         yield {"type": "cancelled", "message": "研究任务已取消"}
                         return
                     continue
-                    
                 if event.get("type") == "__task_done__":
                     finished_workers += 1
                     continue
@@ -347,18 +365,20 @@ class DeepResearchAgent:
             for thread in threads:
                 thread.join(timeout=1.0)
 
-        # 检查取消
-        if self.is_cancelled():
-            yield {"type": "cancelled", "message": "研究任务已取消"}
-            return
-
+    def _stream_report_phase(self, state: SummaryState) -> Iterator[dict[str, Any]]:
+        """Phase 2: 生成深度研究报告。"""
         yield {
             "type": "stage_change",
             "stage": "report",
             "message": "所有研究任务已完成，正在撰写深度研究报告...",
         }
         yield {"type": "log", "message": f"🧠 正在调用 {self.config.smart_llm_model} 模型撰写深度报告..."}
+
+        if self.is_cancelled():
+            return
         report = self.reporting.generate_report(state)
+        if self.is_cancelled():
+            return
         final_step = len(state.todo_items) + 1
         for event in self._drain_tool_events(state, step=final_step):
             yield event
@@ -366,9 +386,7 @@ class DeepResearchAgent:
         state.running_summary = report
         yield {"type": "log", "message": f"✓ 报告撰写完成，共 {len(report)} 字符"}
 
-        # 检查取消
         if self.is_cancelled():
-            yield {"type": "cancelled", "message": "研究任务已取消"}
             return
 
         note_event = self._persist_final_report(state, report)
@@ -382,11 +400,13 @@ class DeepResearchAgent:
             "note_path": state.report_note_path,
         }
 
-        # 检查取消
-        if self.is_cancelled():
-            yield {"type": "cancelled", "message": "研究任务已取消"}
-            return
+    def _stream_script_phase(self, state: SummaryState) -> Iterator[dict[str, Any] | int]:
+        """
+        Phase 3: 将报告转化为播客脚本。
 
+        Yields 流式事件，最终 return 脚本轮次数 (int)。
+        调用方通过 ``script_turns = yield from self._stream_script_phase(state)`` 获取。
+        """
         yield {
             "type": "stage_change",
             "stage": "script",
@@ -394,49 +414,51 @@ class DeepResearchAgent:
         }
         yield {"type": "log", "message": f"🧠 正在调用 {self.config.fast_llm_model} 模型生成播客脚本..."}
         yield {"type": "log", "message": "脚本策划专家正在创作 Host (Xiayu) 与 Guest (Liwa) 的对话..."}
+
+        if self.is_cancelled():
+            return
         script = self.script_generator.generate_script(state)
+        if self.is_cancelled():
+            return
         for event in self._drain_tool_events(state):
             yield event
         state.podcast_script = script
-        
+
         script_turns = len(script) if script else 0
         yield {"type": "log", "message": f"✓ 脚本生成完成，共 {script_turns} 轮对话"}
-        
         yield {
             "type": "podcast_script",
             "script": script,
             "turns": script_turns,
         }
-        
-        # 脚本为空时跳过音频生成
+
         if script_turns == 0:
             yield {"type": "log", "message": "⚠️ 警告：脚本为空，跳过音频生成"}
-            yield {"type": "done"}
-            return
 
-        # 检查取消
-        if self.is_cancelled():
-            yield {"type": "cancelled", "message": "研究任务已取消"}
-            return
+        return script_turns  # type: ignore[return-value]
+
+    def _stream_audio_phase(self, state: SummaryState, script_turns: int) -> Iterator[dict[str, Any]]:
+        """Phase 4: TTS 音频生成 + FFmpeg 合成。"""
+        script = state.podcast_script
 
         yield {
             "type": "stage_change",
             "stage": "audio",
             "message": "正在调用 TTS 语音引擎生成音频...",
         }
+
         task_id = f"task_{state.report_note_id}" if state.report_note_id else "task_default"
-        
+
         # 使用队列实现实时流式音频进度
         audio_event_queue: Queue[dict[str, Any]] = Queue()
         audio_result: list = []
         audio_error: list = []
-        cancel_audio = Event()  # 用于取消音频生成的信号
-        
-        def audio_progress_callback(current, total, role, preview):
-            """将进度事件放入队列以实现实时更新"""
-            # 检查是否应该取消
+        cancel_audio = Event()
+
+        def audio_progress_callback(current: int, total: int, role: str, preview: str) -> bool:
+            """将进度事件放入队列以实现实时更新。"""
             if self.is_cancelled() or cancel_audio.is_set():
-                return False  # 返回 False 表示应该停止
+                return False
             audio_event_queue.put({
                 "type": "audio_progress",
                 "current": current,
@@ -445,10 +467,10 @@ class DeepResearchAgent:
                 "preview": preview,
                 "message": f"[TTS {current}/{total}] ✓ {role} 语音生成成功",
             })
-            return True  # 返回 True 表示继续
-        
-        def run_audio_generation():
-            """在单独线程中运行音频生成"""
+            return True
+
+        def run_audio_generation() -> None:
+            """在单独线程中运行音频生成。"""
             try:
                 files = self.audio_generator.generate_audio(
                     script, task_id, audio_progress_callback,
@@ -460,86 +482,76 @@ class DeepResearchAgent:
                     audio_error.append(str(e))
             finally:
                 audio_event_queue.put({"type": "_audio_done"})
-        
+
         yield {"type": "log", "message": f"准备为 {script_turns} 段对话生成语音..."}
-        
         yield {
             "type": "audio_start",
             "total": script_turns,
             "message": f"开始生成 {script_turns} 段语音",
         }
-        
-        # 在独立线程中启动音频生成
+
         audio_thread = Thread(target=run_audio_generation, daemon=True)
         audio_thread.start()
-        
+
         # 实时流式传输进度事件
         while True:
-            # 检查取消
             if self.is_cancelled():
-                cancel_audio.set()  # 通知音频生成线程停止
+                cancel_audio.set()
                 yield {"type": "cancelled", "message": "研究任务已取消"}
                 audio_thread.join(timeout=2.0)
                 return
-                
             try:
                 event = audio_event_queue.get(timeout=0.1)
                 if event.get("type") == "_audio_done":
                     break
                 yield event
-                # 每个片段完成后发送成功日志
                 if event.get("type") == "audio_progress":
                     yield {
-                        "type": "log", 
-                        "message": f"[TTS {event['current']}/{event['total']}] ✓ {event['role']} 语音已完成"
+                        "type": "log",
+                        "message": f"[TTS {event['current']}/{event['total']}] ✓ {event['role']} 语音已完成",
                     }
             except Empty:
                 continue
-        
+
         audio_thread.join(timeout=5.0)
-        
-        # 检查取消
+
         if self.is_cancelled():
             yield {"type": "cancelled", "message": "研究任务已取消"}
             return
-        
+
         audio_files = audio_result[0] if audio_result else []
         audio_count = len(audio_files) if audio_files else 0
-        
+
         if audio_error:
             yield {"type": "log", "message": f"⚠️ 音频生成出错: {audio_error[0]}"}
-        
+
         yield {"type": "log", "message": f"语音生成完成，成功 {audio_count}/{script_turns} 段"}
-        
         yield {
             "type": "audio_generated",
             "files": audio_files,
             "count": audio_count,
         }
 
+        # 合成播客
         yield {
             "type": "stage_change",
             "stage": "synthesis",
             "message": "正在合成完整播客音频文件...",
         }
 
-        # 检查取消
         if self.is_cancelled():
             yield {"type": "cancelled", "message": "研究任务已取消"}
             return
 
         yield {"type": "log", "message": "使用 FFmpeg 拼接所有语音片段..."}
-        podcast_file = self.podcast_synthesizer.synthesize_podcast(audio_files, task_id, cancel_check=self.is_cancelled)
+        podcast_file = self.podcast_synthesizer.synthesize_podcast(
+            audio_files, task_id, cancel_check=self.is_cancelled,
+        )
         if podcast_file:
-            yield {
-                "type": "podcast_ready",
-                "file": podcast_file,
-            }
+            yield {"type": "podcast_ready", "file": podcast_file}
             yield {"type": "log", "message": f"🎉 播客文件生成成功: {podcast_file}"}
         else:
             yield {"type": "log", "message": "⚠️ 播客合成失败，请检查 FFmpeg 配置"}
-
-        yield {"type": "done"}
 
     # ------------------------------------------------------------------
     # 执行助手
