@@ -6,7 +6,7 @@
 
 - 统一智能体注册表：后端通过 `AgentRegistry` 管理不同智能体。
 - 后台任务执行：长任务默认后台运行，前端轮询任务状态，不阻塞输入框。
-- 搜索员：封装 chapter14 的 DeepResearchAgent，生成调研报告并保留运行产物和长期笔记。
+- 搜索员：内置 DeepResearchAgent，生成调研报告并保留运行产物和长期笔记。
 - 资讯员：拉取 RSS、抽取正文、调用 LLM 生成中文摘要，并渲染 HTML 简报。
 - 数据分区：所有智能体数据统一放在 `data/{agent_id}/`，便于清理和提交时忽略。
 
@@ -38,6 +38,10 @@ agent_platform_base/
   agents/
     deep_research/
       README.md
+      src/
+        agent.py
+        config.py
+        services/
     rss_digest/
       src/rss_digest/
       config/
@@ -72,7 +76,8 @@ agent_platform_base/
 - Python 3.10+
 - FastAPI / Uvicorn
 - Pydantic
-- Requests / Feedparser / BeautifulSoup / Readability
+- hello-agents / OpenAI SDK / Tavily / DDGS
+- Requests / Python 标准库 RSS 与 HTML 解析
 - 原生 HTML、CSS、JavaScript
 
 ## 快速开始

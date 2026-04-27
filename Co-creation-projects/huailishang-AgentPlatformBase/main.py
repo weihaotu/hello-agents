@@ -12,5 +12,6 @@ if __name__ == "__main__":
         "backend.main:app",
         host=os.getenv("APP_HOST", settings.app_host),
         port=int(os.getenv("APP_PORT", str(settings.app_port))),
+        access_log=os.getenv("APP_ACCESS_LOG", "false").strip().lower() in {"1", "true", "yes", "on"},
         reload=False,
     )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -15,6 +17,13 @@ from backend.tasks.batch import BatchRunner
 from backend.tasks.manager import task_manager
 from backend.tasks.runner import TaskRunner
 
+
+if os.getenv("APP_ACCESS_LOG", "false").strip().lower() not in {"1", "true", "yes", "on"}:
+    logging.getLogger("uvicorn.access").disabled = True
+    logging.getLogger("uvicorn.access").setLevel(logging.CRITICAL + 1)
+
+for noisy_logger in ("agent", "services", "services.planner", "services.tool_events"):
+    logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 

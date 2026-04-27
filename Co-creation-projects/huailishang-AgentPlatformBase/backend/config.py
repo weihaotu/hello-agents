@@ -37,15 +37,33 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _path_env(name: str, default: Path) -> str:
+    value = os.getenv(name)
+    path = Path(value) if value else default
+    if not path.is_absolute():
+        path = ROOT_DIR / path
+    return str(path.resolve())
+
+
+def _chapter14_backend_default() -> Path:
+    chapter14_root = ROOT_DIR.parents[1] / "chapter14"
+    candidates = [
+        ROOT_DIR / "agents" / "deep_research" / "src",
+        chapter14_root / "helloagents-deepresearch" / "backend" / "src",
+        chapter14_root / "helloagents-deepresearch-fixed" / "backend" / "src",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "Agent Platform Base")
     app_host: str = os.getenv("APP_HOST", "127.0.0.1")
     app_port: int = int(os.getenv("APP_PORT", "8016"))
-    chapter14_backend_path: str = os.getenv(
-        "CHAPTER14_BACKEND_PATH",
-        str((ROOT_DIR.parents[1] / "chapter14" / "helloagents-deepresearch-fixed" / "backend" / "src").resolve()),
-    )
+    chapter14_backend_path: str = _path_env("CHAPTER14_BACKEND_PATH", _chapter14_backend_default())
 
     llm_provider: str | None = os.getenv("LLM_PROVIDER") or None
     llm_model_id: str | None = os.getenv("LLM_MODEL_ID") or None
