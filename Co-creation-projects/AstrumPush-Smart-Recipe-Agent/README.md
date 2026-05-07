@@ -55,6 +55,10 @@ pip install -r requirements.txt
 
 # 安装 Node.js 环境（用于 MCP 工具）
 # 访问 https://nodejs.org 下载安装
+
+# 替换hello-agents底层代码
+将本项目下的protocol_tools.py文件，替换掉hello-agents中的文件，地址如下（根据本机环境自行调整即可）：
+D:\Anaconda3\envs\agents\Lib\site-packages\hello_agents\tools\builtin
 ```
 
 ### 2️⃣ 配置环境变量
@@ -140,6 +144,8 @@ smart-recipe-agent/
 ├── recipes/                # 生成的菜谱文件目录（自动创建）
 │   └── recipes_20260428_153022.md
 ├── requirements.txt        # Python 依赖（建议创建）
+├── protocol_tools.py        # 需要修改的hello-agents代码模块
+├── basic_func_test.py        # 用于验证是否可以使用web_search模块
 └── README.md              # 项目说明文档
 ```
 
@@ -161,10 +167,7 @@ smart-recipe-agent/
 
 ### 响应解析规则
 
-`parse_response()` 函数支持多种 JSON 返回格式：
-- ```json 代码块包裹
-- ``` 通用代码块包裹  
-- 纯 JSON 字符串（含 `{}`）
+`parse_response()` 函数支持纯 JSON 字符串（含 `{}`）解析
 
 解析失败时会输出警告并返回 `None`，主流程会进行空值检查。
 
