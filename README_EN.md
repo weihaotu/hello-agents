@@ -133,7 +133,7 @@ We are an open-source community and welcome any form of contribution!
 ## 🙏 Acknowledgments
 
 ### Core Contributors
-- [Chen Sizhou - Project Lead](https://github.com/jjyaoao) (Datawhale member, full text writing and proofreading)
+- [Chen Sizhou - Project Lead](https://github.com/jjyaoao) (Datawhale member, full text writing and proofreading) <a href="https://www.xiaohongshu.com/user/profile/67b9cc34000000000e013517" target="_blank"><img alt="Static Badge" src="https://img.shields.io/badge/Rednote-小红书-e93c49"></a>
 - [Sun Tao - Co-sponsor](https://github.com/fengju0213) (Datawhale member, CAMEL-AI, Chapter 9 content and proofreading)
 - [Jiang Shufan - Co-sponsor](https://github.com/Tsumugii24) (Datawhale member, chapter exercise design and proofreading)
 - [Huang Peilin - Datawhale Prospective Member](https://github.com/HeteroCat) (Agent Development Engineer, Chapter 5 content contributor)
