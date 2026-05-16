@@ -63,8 +63,14 @@ class ContextManager:
             self.summary = new_summary
 
         # 限制摘要长度
-        if self._estimate_tokens(self.summary) > 1500:
-            self.summary = self.summary[-1500:]
+        while self._estimate_tokens(self.summary) > 1500:
+            # Drop the earliest part of the summary string by splitting on lines
+            lines = self.summary.split('\n')
+            if len(lines) <= 2:
+                # If there are only a couple lines left, we must chop characters
+                self.summary = self.summary[int(len(self.summary) * 0.8):]
+            else:
+                self.summary = "对话历史摘要:\n" + "\n".join(lines[2:])
 
         self.turns = recent
 

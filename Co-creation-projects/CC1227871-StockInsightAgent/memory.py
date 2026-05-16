@@ -24,9 +24,22 @@ class StockMemory:
         return {"watchlist": {}, "history": [], "preferences": {}}
 
     def _save(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, ensure_ascii=False, indent=2)
+        import tempfile
+        import threading
+
+        if not hasattr(self, '_lock'):
+            self._lock = threading.Lock()
+
+        with self._lock:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(self.path))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(self.data, f, ensure_ascii=False, indent=2)
+                os.replace(temp_path, self.path)
+            except Exception:
+                os.remove(temp_path)
+                raise
 
     # ===== 关注列表 =====
     def add_watchlist(self, code: str, name: str = "", notes: str = "") -> str:
