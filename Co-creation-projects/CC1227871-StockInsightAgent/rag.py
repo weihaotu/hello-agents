@@ -41,8 +41,12 @@ class InvestmentKnowledgeBase:
         if not os.path.exists(filepath):
             return f"文件不存在: {filepath}"
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                text = f.read()
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    text = f.read()
+            except UnicodeDecodeError:
+                with open(filepath, "r", encoding="gbk") as f:
+                    text = f.read()
         except Exception as e:
             return f"读取文件失败: {e}"
         title = os.path.basename(filepath)

@@ -77,13 +77,12 @@ def _safe_fetch(func, *args, **kwargs):
     import random
     for attempt in range(3):
         try:
-            time.sleep(2 + random.random())
             return func(*args, **kwargs)
         except Exception as e:
             if attempt < 2:
                 time.sleep(4 + random.random() * 2)
             else:
-                return f"数据获取失败: {e}"
+                return None
 
 
 # ==================== 工具函数 ====================
@@ -104,10 +103,10 @@ def get_realtime_quote(query: str) -> str:
                          start_date=(datetime.now() - timedelta(days=10)).strftime("%Y%m%d"),
                          end_date=datetime.now().strftime("%Y%m%d"),
                          adjust="qfq")
-        if isinstance(df, str) or df is None or df.empty:
+        if df is None or df.empty:
             df = _safe_fetch(ak.stock_zh_a_hist, symbol=symbol, period="daily", start_date=(datetime.now() - timedelta(days=10)).strftime("%Y%m%d"), end_date=datetime.now().strftime("%Y%m%d"), adjust="qfq")
 
-        if isinstance(df, str) or df is None or df.empty:
+        if df is None or df.empty:
             return f"未找到 {symbol} 的行情数据"
 
         if df is not None and not df.empty:
@@ -176,16 +175,16 @@ def get_historical_data(query: str) -> str:
         hist = _safe_fetch(ak.stock_zh_a_hist,
                            symbol=symbol, period=ak_period, start_date=start,
                            end_date=end, adjust="qfq")
-        if isinstance(hist, str) or hist is None or hist.empty:
+        if hist is None or hist.empty:
             hist = _safe_fetch(ak.stock_zh_a_daily,
                            symbol=sina_code, start_date=start,
                            end_date=end, adjust="qfq")
-        if isinstance(hist, str):
+        if hist is None or hist.empty:
             # 尝试 Tencent 源
             time.sleep(2)
             hist = ak.stock_zh_a_hist_tx(symbol=sina_code,
                                          start_date=start, end_date=end)
-            if isinstance(hist, str) or hist is None or hist.empty:
+            if hist is None or hist.empty:
                 return f"未找到 {symbol} 的历史数据"
             # Tencent 列名映射
             hist = hist.rename(columns={
@@ -233,7 +232,7 @@ def get_financial_data(symbol: str) -> str:
 
     try:
         df = _safe_fetch(ak.stock_financial_abstract, symbol=symbol)
-        if isinstance(df, str) or df is None or df.empty:
+        if df is None or df.empty:
             return f"未找到 {symbol} 的财务数据"
     except Exception as e:
         return f"获取财务数据失败: {e}"
@@ -328,11 +327,11 @@ def calc_indicators(query: str) -> str:
         df = _safe_fetch(ak.stock_zh_a_daily,
                          symbol=sina_code, start_date=start,
                          end_date=end, adjust="qfq")
-        if isinstance(df, str) or df is None or df.empty:
+        if df is None or df.empty:
             # 尝试新版 API fallback
             df = _safe_fetch(ak.stock_zh_a_hist, symbol=symbol, period="daily", start_date=start, end_date=end, adjust="qfq")
 
-        if isinstance(df, str) or df is None or df.empty:
+        if df is None or df.empty:
             return f"未找到 {symbol} 的数据"
 
         if df is not None and not df.empty:
@@ -460,7 +459,7 @@ def get_news(symbol: str) -> str:
 
     try:
         news_df = _safe_fetch(ak.stock_news_em, symbol=symbol)
-        if isinstance(news_df, str) or news_df is None or news_df.empty:
+        if news_df is None or news_df.empty:
             return f"未找到 {symbol} 的相关新闻"
     except Exception as e:
         return f"获取新闻失败: {e}"

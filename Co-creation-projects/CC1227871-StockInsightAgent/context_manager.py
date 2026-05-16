@@ -67,8 +67,9 @@ class ContextManager:
             # Drop the earliest part of the summary string by splitting on lines
             lines = self.summary.split('\n')
             if len(lines) <= 2:
-                # If there are only a couple lines left, we must chop characters
-                self.summary = self.summary[int(len(self.summary) * 0.8):]
+                # If there are only a couple lines left, we must chop strings carefully or discard
+                self.summary = ""
+                break
             else:
                 self.summary = "对话历史摘要:\n" + "\n".join(lines[2:])
 

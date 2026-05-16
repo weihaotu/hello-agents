@@ -54,4 +54,4 @@ class HelloAgentsLLM:
                 return clean
             except Exception as e2:
                 print(f"[ERR] 非流式也失败: {e2}")
-                return None
+                raise RuntimeError(f"LLM调用完全失败: {e2}")
