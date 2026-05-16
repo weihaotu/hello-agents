@@ -115,35 +115,38 @@ class FrameworkStockAgent:
         base = HelloAgentsLLM()
         reasoning_entries = []  # 按序存储每轮 assistant 的 reasoning_content
 
-        adapter = base._adapter
-        adapter._client = adapter.create_client()
-        original_create = adapter._client.chat.completions.create
+        try:
+            adapter = base._adapter
+            adapter._client = adapter.create_client()
+            original_create = adapter._client.chat.completions.create
 
-        def patched_create(*args, **kwargs):
-            messages = kwargs.get("messages", [])
-            # 注入 reasoning_content：给最近一条没有它的 assistant 消息
-            missing_idx = 0
-            fixed_msgs = []
-            for m in messages:
-                m2 = dict(m)
-                if m2.get("role") == "assistant" and not m2.get("reasoning_content"):
-                    if missing_idx < len(reasoning_entries):
-                        m2["reasoning_content"] = reasoning_entries[missing_idx]
-                    missing_idx += 1
-                fixed_msgs.append(m2)
-            kwargs["messages"] = fixed_msgs
-            resp = original_create(*args, **kwargs)
-            # 保存新 reasoning_content
-            try:
-                msg = resp.choices[0].message
-                rc = getattr(msg, "reasoning_content", None)
-                if rc:
-                    reasoning_entries.append(rc)
-            except Exception:
-                pass
-            return resp
+            def patched_create(*args, **kwargs):
+                messages = kwargs.get("messages", [])
+                # 注入 reasoning_content：给最近一条没有它的 assistant 消息
+                missing_idx = 0
+                fixed_msgs = []
+                for m in messages:
+                    m2 = dict(m)
+                    if m2.get("role") == "assistant" and not m2.get("reasoning_content"):
+                        if missing_idx < len(reasoning_entries):
+                            m2["reasoning_content"] = reasoning_entries[missing_idx]
+                        missing_idx += 1
+                    fixed_msgs.append(m2)
+                kwargs["messages"] = fixed_msgs
+                resp = original_create(*args, **kwargs)
+                # 保存新 reasoning_content
+                try:
+                    msg = resp.choices[0].message
+                    rc = getattr(msg, "reasoning_content", None)
+                    if rc:
+                        reasoning_entries.append(rc)
+                except Exception:
+                    pass
+                return resp
 
-        adapter._client.chat.completions.create = patched_create
+            adapter._client.chat.completions.create = patched_create
+        except Exception as e:
+            print(f"Warning: _build_llm monkey patch failed, falling back to standard LLM: {e}")
         return base
 
     def _run_with_context(self, agent, question: str, mode: str):

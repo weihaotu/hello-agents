@@ -11,8 +11,10 @@ class StockMemory:
     """股票分析记忆 — JSON 文件持久化"""
 
     def __init__(self, path: str = "memory/stock_memory.json"):
+        import threading
         self.path = path
         self.data = self._load()
+        self._lock = threading.Lock()
 
     def _load(self) -> dict:
         if os.path.exists(self.path):
@@ -25,10 +27,6 @@ class StockMemory:
 
     def _save(self):
         import tempfile
-        import threading
-
-        if not hasattr(self, '_lock'):
-            self._lock = threading.Lock()
 
         with self._lock:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
