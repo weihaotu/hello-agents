@@ -43,6 +43,24 @@ def _resolve_symbol(query: str) -> str:
     query = query.strip()
     if query.isdigit() and len(query) == 6:
         return query
+
+    # 尝试使用 akshare stock_info_a_code_name 映射
+    try:
+        import akshare as ak
+        stock_info = ak.stock_info_a_code_name()
+
+        # 匹配名称
+        match = stock_info[stock_info["name"] == query]
+        if not match.empty:
+            return match["code"].values[0]
+
+        # 模糊匹配名称
+        fuzzy_match = stock_info[stock_info["name"].str.contains(query, na=False)]
+        if not fuzzy_match.empty:
+            return fuzzy_match["code"].values[0]
+    except Exception:
+        pass
+
     # 尝试通过新闻接口反查（间接方式）
     try:
         time.sleep(1)
@@ -76,7 +94,7 @@ def get_realtime_quote(query: str) -> str:
     数据源: 东方财富个股信息 + Sina 日线最新一条。
     """
     print(f"  [查询实时行情] {query}")
-    symbol = query.strip()
+    symbol = _resolve_symbol(query)
 
     # 使用 Sina 日线获取最新价格
     try:
@@ -87,7 +105,18 @@ def get_realtime_quote(query: str) -> str:
                          end_date=datetime.now().strftime("%Y%m%d"),
                          adjust="qfq")
         if isinstance(df, str) or df is None or df.empty:
+            df = _safe_fetch(ak.stock_zh_a_hist, symbol=symbol, period="daily", start_date=(datetime.now() - timedelta(days=10)).strftime("%Y%m%d"), end_date=datetime.now().strftime("%Y%m%d"), adjust="qfq")
+
+        if isinstance(df, str) or df is None or df.empty:
             return f"未找到 {symbol} 的行情数据"
+
+        if df is not None and not df.empty:
+            # 统一列名为英文以适配下游逻辑
+            rename_map = {
+                "日期": "date", "开盘": "open", "收盘": "close",
+                "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount"
+            }
+            df = df.rename(columns=rename_map)
     except Exception as e:
         return f"获取行情失败: {e}"
 
@@ -123,14 +152,14 @@ def get_realtime_quote(query: str) -> str:
 def get_historical_data(query: str) -> str:
     """
     获取历史K线数据。输入格式: "symbol|period|days"
-    period: daily(日), days: 最近多少天(默认60)
+    period: daily/weekly/monthly(日/周/月), days: 最近多少个周期(默认60)
     示例: "600519|daily|30"
     数据源: Sina
     """
     print(f"  [查询历史数据] {query}")
 
     parts = query.strip().split("|")
-    symbol = parts[0].strip()
+    symbol = _resolve_symbol(parts[0].strip())
     period = parts[1].strip() if len(parts) > 1 else "daily"
     try:
         days = int(parts[2]) if len(parts) > 2 else 60
@@ -138,11 +167,17 @@ def get_historical_data(query: str) -> str:
         days = 60
 
     end = datetime.now().strftime("%Y%m%d")
-    start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=days * 30)).strftime("%Y%m%d") if period != "daily" else (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")
 
     try:
         sina_code = _to_sina_code(symbol)
-        hist = _safe_fetch(ak.stock_zh_a_daily,
+        period_map = {"daily": "daily", "weekly": "weekly", "monthly": "monthly"}
+        ak_period = period_map.get(period, "daily")
+        hist = _safe_fetch(ak.stock_zh_a_hist,
+                           symbol=symbol, period=ak_period, start_date=start,
+                           end_date=end, adjust="qfq")
+        if isinstance(hist, str) or hist is None or hist.empty:
+            hist = _safe_fetch(ak.stock_zh_a_daily,
                            symbol=sina_code, start_date=start,
                            end_date=end, adjust="qfq")
         if isinstance(hist, str):
@@ -157,6 +192,13 @@ def get_historical_data(query: str) -> str:
                 "date": "date", "open": "open", "close": "close",
                 "high": "high", "low": "low", "amount": "volume"
             })
+        elif hist is not None and not hist.empty:
+            # 统一列名为英文以适配下游逻辑
+            rename_map = {
+                "日期": "date", "开盘": "open", "收盘": "close",
+                "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount"
+            }
+            hist = hist.rename(columns=rename_map)
     except Exception as e:
         return f"获取历史数据失败: {e}"
 
@@ -237,16 +279,16 @@ def get_financial_data(symbol: str) -> str:
         try:
             if unit == "元" and abs(float(val)) > 1e8:
                 val_str = f"{float(val)/1e8:.2f}亿"
-                if prev_val and not pd.isna(prev_val) and abs(float(prev_val)) > 1e8:
+                if prev_val is not None and not pd.isna(prev_val) and abs(float(prev_val)) > 1e8:
                     prev_str = f"{float(prev_val)/1e8:.2f}亿"
                 else:
                     prev_str = None
             elif unit == "%":
                 val_str = f"{float(val):.2f}%"
-                prev_str = f"{float(prev_val):.2f}%" if prev_val and not pd.isna(prev_val) else None
+                prev_str = f"{float(prev_val):.2f}%" if prev_val is not None and not pd.isna(prev_val) else None
             else:
                 val_str = f"{float(val):.4f}"
-                prev_str = f"{float(prev_val):.4f}" if prev_val and not pd.isna(prev_val) else None
+                prev_str = f"{float(prev_val):.4f}" if prev_val is not None and not pd.isna(prev_val) else None
         except (ValueError, TypeError):
             val_str = str(val)
             prev_str = str(prev_val) if prev_val is not None else None
@@ -287,7 +329,19 @@ def calc_indicators(query: str) -> str:
                          symbol=sina_code, start_date=start,
                          end_date=end, adjust="qfq")
         if isinstance(df, str) or df is None or df.empty:
+            # 尝试新版 API fallback
+            df = _safe_fetch(ak.stock_zh_a_hist, symbol=symbol, period="daily", start_date=start, end_date=end, adjust="qfq")
+
+        if isinstance(df, str) or df is None or df.empty:
             return f"未找到 {symbol} 的数据"
+
+        if df is not None and not df.empty:
+            # 统一列名为英文以适配下游逻辑
+            rename_map = {
+                "日期": "date", "开盘": "open", "收盘": "close",
+                "最高": "high", "最低": "low", "成交量": "volume", "成交额": "amount"
+            }
+            df = df.rename(columns=rename_map)
     except Exception as e:
         return f"获取数据失败: {e}"
 
@@ -328,10 +382,14 @@ def calc_indicators(query: str) -> str:
     bar_color = "红柱" if macd_bar.iloc[-1] > 0 else "绿柱"
     lines.append(f"  MACD柱: {macd_bar.iloc[-1]:.3f}  ({bar_color})")
 
-    if dif.iloc[-1] > dea.iloc[-1] and dif.iloc[-2] <= dea.iloc[-2]:
-        lines.append("  [!] 信号: 金叉(买入信号)")
-    elif dif.iloc[-1] < dea.iloc[-1] and dif.iloc[-2] >= dea.iloc[-2]:
-        lines.append("  [!] 信号: 死叉(卖出信号)")
+    if len(dif) >= 2:
+        if dif.iloc[-1] > dea.iloc[-1] and dif.iloc[-2] <= dea.iloc[-2]:
+            lines.append("  [!] 信号: 金叉(买入信号)")
+        elif dif.iloc[-1] < dea.iloc[-1] and dif.iloc[-2] >= dea.iloc[-2]:
+            lines.append("  [!] 信号: 死叉(卖出信号)")
+        else:
+            trend = "多头" if dif.iloc[-1] > dea.iloc[-1] else "空头"
+            lines.append(f"  趋势: {trend}持续")
     else:
         trend = "多头" if dif.iloc[-1] > dea.iloc[-1] else "空头"
         lines.append(f"  趋势: {trend}持续")

@@ -124,8 +124,8 @@ class InvestmentKnowledgeBase:
 
         if not scores:
             # 回退到关键词匹配
-            for i, doc in enumerate(all_docs):
-                if any(kw in doc for kw in query):
+            for i, (doc, doc_tokens) in enumerate(zip(all_docs, tokenized_docs)):
+                if any(kw in doc_tokens for kw in tokenized_query):
                     scores.append((0.5, i))
             scores.sort(key=lambda x: x[0], reverse=True)
 
