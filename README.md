@@ -176,7 +176,7 @@
 ## Star History
 
 <div align='center'>
-    <img src="./docs/images/star-history-2026424.png" alt="Datawhale" width="90%">
+    <img src="./docs/images/datawhalechina-hello-agents-stats-20260516.png" alt="Datawhale" width="90%">
 </div>
 
 <div align="center">
